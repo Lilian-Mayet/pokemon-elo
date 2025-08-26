@@ -1,38 +1,29 @@
 import React from 'react';
-import { DuelArena } from './features/duel/DuelArena';
-import { Leaderboard } from './features/leaderboard/Leaderboard';
-import { SearchAndStats } from './features/search/SearchAndStats';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Header } from './components/Header';
-
+import DuelPage from './pages/DuelPage';
+import LeaderboardPage from './pages/LeaderboardPage';
+import SearchPage from './pages/SearchPage';
 
 export default function App() {
-const [dark, setDark] = React.useState(false);
-React.useEffect(() => {
-document.documentElement.classList.toggle('dark', dark);
-}, [dark]);
+  const [dark, setDark] = React.useState(false);
+  React.useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark);
+  }, [dark]);
 
-
-return (
-<>
-<Header darkMode={dark} onToggleDark={() => setDark(v => !v)} />
-<main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-16">
-<section id="play" className="pt-6">
-<h2 className="text-lg font-semibold mb-3">Play</h2>
-<DuelArena />
-</section>
-
-
-<section id="leaderboard" className="pt-10">
-<h2 className="text-lg font-semibold mb-3">Leaderboard</h2>
-<Leaderboard />
-</section>
-
-
-<section id="search" className="pt-10">
-<h2 className="text-lg font-semibold mb-3">Search & Stats</h2>
-<SearchAndStats />
-</section>
-</main>
-</>
-);
+  return (
+    <>
+      <Header darkMode={dark} onToggleDark={() => setDark(v => !v)} />
+      <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+        <Routes>
+          <Route path="/" element={<Navigate to="/duel" replace />} />
+          <Route path="/duel" element={<DuelPage />} />
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
+          <Route path="/search" element={<SearchPage />} />
+          {/* 404 simple */}
+          <Route path="*" element={<div className="py-10 text-sm text-gray-500">Page not found.</div>} />
+        </Routes>
+      </main>
+    </>
+  );
 }
