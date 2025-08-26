@@ -33,421 +33,94 @@ def get_db_connection():
     )
     return conn
 
-@app.route('/random_cards', methods=['GET'])
-def random_cards():
+
+
+# ─────────────────────────────────────────────────────────────
+# Analytics endpoints (dicts prêts pour les graphes)
+# ─────────────────────────────────────────────────────────────
+
+def _rows_to_dict(rows, key_field, avg_field="avg_elo", count_field="count"):
+    out = {}
+    for r in rows:
+        key = r[key_field] if r[key_field] is not None else "Unknown"
+        out[str(key)] = {
+            "avgElo": float(r[avg_field]) if r[avg_field] is not None else 0.0,
+            "count": int(r[count_field]) if r[count_field] is not None else 0,
+        }
+    return out
+
+@app.route('/api/stats/sets', methods=['GET'])
+def stats_sets():
     conn = get_db_connection()
-    print(conn)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT pc.id, pc.name, pc.image_url_large, pc.artist, ps.name AS set_name, ps.series
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT ps.name AS set_name,
+               AVG(COALESCE(pc.elo, 1000)) AS avg_elo,
+               COUNT(*) AS count
         FROM public.pokemon_card pc
-        JOIN public.pokemon_sets ps ON pc.set_id = ps.id
-        ORDER BY RANDOM()
-        LIMIT 2;
-    """)
-    
-    cards = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify(cards)
-
-
-@app.route('/save_choice', methods=['POST'])
-def save_choice():
-    data = request.json
-    card1_id = data.get('card1_id')
-    card2_id = data.get('card2_id')
-    fav_card_id = data.get('fav_card_id')
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        INSERT INTO public.choice (card1_id, card2_id, fav_card_id)
-        VALUES (%s, %s, %s)
-    """, (card1_id, card2_id, fav_card_id))
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    return jsonify({"message": "Choix enregistré avec succès"}), 201
-
-
-@app.route('/top_100_cards', methods=['GET'])
-def get_top_100_cards():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    query = """
-        SELECT 
-            pc.id, 
-            pc.name, 
-            pc.artist, 
-            pc.image_url_large, 
-            COUNT(c.fav_card_id) AS wins, 
-            (SELECT COUNT(*) FROM public.choice WHERE card1_id = pc.id OR card2_id = pc.id) AS total_duels,
-            CASE 
-                WHEN (SELECT COUNT(*) FROM public.choice WHERE card1_id = pc.id OR card2_id = pc.id) = 0 THEN 0
-                ELSE ROUND(CAST(COUNT(c.fav_card_id) AS decimal) / (SELECT COUNT(*) FROM public.choice WHERE card1_id = pc.id OR card2_id = pc.id) * 100, 2)
-            END AS win_rate
-        FROM public.pokemon_card pc
-        LEFT JOIN public.choice c ON pc.id = c.fav_card_id
-        GROUP BY pc.id
-        HAVING (SELECT COUNT(*) FROM public.choice WHERE card1_id = pc.id OR card2_id = pc.id) > 0
-        ORDER BY win_rate DESC
-        LIMIT 100;
-    """
-
-    cursor.execute(query)
-    cards = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify(cards)
-
-
-
-
-
-@app.route('/top_illustrators', methods=['GET'])
-def get_top_illustrators():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    query = """
-        SELECT pc.artist, COUNT(c.fav_card_id) AS total_wins, 
-        COUNT(DISTINCT pc.id) AS total_cards,
-        ROUND(CAST(COUNT(c.fav_card_id) AS decimal) / COUNT(DISTINCT pc.id) * 100, 2) AS win_rate
-        FROM public.pokemon_card pc
-        LEFT JOIN public.choice c ON pc.id = c.fav_card_id
-        WHERE pc.artist IS NOT NULL
-        GROUP BY pc.artist
-        ORDER BY win_rate DESC
-        LIMIT 10;
-    """
-
-    cursor.execute(query)
-    illustrators = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify(illustrators)
-
-
-@app.route('/top_sets', methods=['GET'])
-def get_top_sets():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    query = """
-        SELECT ps.name, COUNT(c.fav_card_id) AS total_wins, 
-        COUNT(DISTINCT pc.id) AS total_cards,
-        ROUND(CAST(COUNT(c.fav_card_id) AS decimal) / COUNT(DISTINCT pc.id) * 100, 2) AS win_rate
-        FROM public.pokemon_sets ps
-        JOIN public.pokemon_card pc ON pc.set_id = ps.id
-        LEFT JOIN public.choice c ON pc.id = c.fav_card_id
+        JOIN public.pokemon_sets ps ON ps.id = pc.set_id
         GROUP BY ps.name
-        ORDER BY win_rate DESC
-        LIMIT 10;
-    """
+        ORDER BY avg_elo DESC;
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify(_rows_to_dict(rows, "set_name"))
 
-    cursor.execute(query)
-    sets = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify(sets)
-
-
-@app.route('/top_years', methods=['GET'])
-def get_top_years():
+@app.route('/api/stats/rarities', methods=['GET'])
+def stats_rarities():
     conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Requête pour obtenir le taux de victoires par année, classé chronologiquement
-    query = """
-        SELECT EXTRACT(YEAR FROM ps.release_date) AS year, 
-               COUNT(c.fav_card_id) AS total_wins, 
-               COUNT(DISTINCT pc.id) AS total_cards,
-               ROUND(CAST(COUNT(c.fav_card_id) AS decimal) / COUNT(DISTINCT pc.id) * 100, 2) AS win_rate
-        FROM public.pokemon_sets ps
-        JOIN public.pokemon_card pc ON pc.set_id = ps.id
-        LEFT JOIN public.choice c ON pc.id = c.fav_card_id
-        GROUP BY year
-        ORDER BY year ASC;  -- Classement chronologique
-    """
-
-    cursor.execute(query)
-    years = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify(years)
-
-
-
-@app.route('/win_rate_by_type', methods=['GET'])
-def get_top_types():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    query = """
-        SELECT pc.types, COUNT(c.fav_card_id) AS total_wins, 
-        COUNT(DISTINCT pc.id) AS total_cards,
-        ROUND(CAST(COUNT(c.fav_card_id) AS decimal) / COUNT(DISTINCT pc.id) * 100, 2) AS win_rate
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT NULLIF(TRIM(pc.rarity), '') AS rarity,
+               AVG(COALESCE(pc.elo, 1000)) AS avg_elo,
+               COUNT(*) AS count
         FROM public.pokemon_card pc
-        LEFT JOIN public.choice c ON pc.id = c.fav_card_id
-        WHERE pc.types IS NOT NULL
-        GROUP BY pc.types
-        ORDER BY win_rate DESC
-        
-    """
+        GROUP BY rarity
+        ORDER BY avg_elo DESC;
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify(_rows_to_dict(rows, "rarity"))
 
-    cursor.execute(query)
-    illustrators = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify(illustrators)
-
-@app.route('/search_pokemon_card', methods=['GET'])
-def search_pokemon_card():
+@app.route('/api/stats/artists', methods=['GET'])
+def stats_artists():
+    # Filtre optionnel ?min_cards=3 pour éviter les outliers à 1 carte
+    min_cards = int(request.args.get('min_cards', 3))
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT NULLIF(TRIM(pc.artist), '') AS artist,
+               AVG(COALESCE(pc.elo, 1000)) AS avg_elo,
+               COUNT(*) AS count
+        FROM public.pokemon_card pc
+        GROUP BY artist
+        HAVING COUNT(*) >= %s
+        ORDER BY avg_elo DESC;
+    """, (min_cards,))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify(_rows_to_dict(rows, "artist"))
 
-    name_query = request.args.get('name')
-    page = request.args.get('page', 1, type=int)  # Get page, default is 1
-    limit = 20  # Number of items per page
-    offset = (page - 1) * limit  # Calculate offset
-
-    query = """
-    SELECT pc.id, pc.name, ps.name AS set_name, pc.image_url_large 
-    FROM pokemon_card pc
-    JOIN pokemon_sets ps ON pc.set_id = ps.id
-    WHERE pc.name ILIKE %s
-    LIMIT %s OFFSET %s;
-    """
-    cursor.execute(query, (f'%{name_query}%', limit, offset))
-    cards = cursor.fetchall()
-
-    # Count total results for pagination
-    count_query = """
-    SELECT COUNT(*)
-    FROM pokemon_card pc
-    WHERE pc.name ILIKE %s;
-    """
-    cursor.execute(count_query, (f'%{name_query}%',))
-    total_results = cursor.fetchone()[0]
-
-    cursor.close()
-    conn.close()
-
-    return jsonify({
-        'cards': cards,
-        'total_results': total_results,
-        'total_pages': (total_results + limit - 1) // limit,  # Calculate total pages
-        'current_page': page
-    })
-
-
-@app.route('/card_info', methods=['GET'])
-def card_info():
+@app.route('/api/stats/years', methods=['GET'])
+def stats_years():
+    # Année extraite de pokemon_sets.release_date ; on ignore NULL
     conn = get_db_connection()
-    cursor = conn.cursor()
-    card_id = request.args.get('id')
-    query = """
-    SELECT pc.name, ps.name AS set_name, pc.artist, pc.types, pc.rarity, pc.image_url_large,
-           (SELECT ROUND(CAST(COUNT(c.fav_card_id) AS decimal) / COUNT(DISTINCT all_cards.id) * 100, 2)
-            FROM pokemon_card all_cards
-            LEFT JOIN choice c ON all_cards.id = c.fav_card_id
-            WHERE all_cards.id = pc.id) AS win_rate,
-           (SELECT RANK() OVER (ORDER BY COUNT(c.fav_card_id) DESC)
-            FROM pokemon_card all_cards
-            LEFT JOIN choice c ON all_cards.id = c.fav_card_id
-            WHERE all_cards.id = pc.id) AS rank
-    FROM pokemon_card pc
-    JOIN pokemon_sets ps ON pc.set_id = ps.id
-    WHERE pc.id = %s;
-    """
-    cursor.execute(query, (card_id,))
-    card = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    print(card)
-    return jsonify(card[0])
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT EXTRACT(YEAR FROM ps.release_date)::INT AS year,
+               AVG(COALESCE(pc.elo, 1000)) AS avg_elo,
+               COUNT(*) AS count
+        FROM public.pokemon_card pc
+        JOIN public.pokemon_sets ps ON ps.id = pc.set_id
+        WHERE ps.release_date IS NOT NULL
+        GROUP BY year
+        ORDER BY year ASC;
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
 
+    return jsonify(_rows_to_dict(rows, "year"))
 
-
-@app.route('/choice_stats', methods=['POST'])
-def choice_stats():
-    data = request.json
-    card1_id = data['card1_id']
-    card2_id = data['card2_id']
-
-    # Connexion à la base de données
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Requête pour obtenir le nombre total de choix pour ces deux cartes
-    total_choices_query = """
-    SELECT COUNT(*) FROM choice 
-    WHERE card1_id = %s OR card2_id = %s
-    """
-    cursor.execute(total_choices_query, (card1_id, card2_id))
-    total_choices = cursor.fetchone()[0]
-
-    if total_choices == 0:
-        return jsonify({
-            'card1_percentage': 0,
-            'card2_percentage': 0
-        })
-
-    # Requête pour obtenir combien de fois chaque carte a été choisie
-    card1_wins_query = """
-    SELECT COUNT(*) FROM choice 
-    WHERE fav_card_id = %s
-    """
-    cursor.execute(card1_wins_query, (card1_id,))
-    card1_wins = cursor.fetchone()[0]
-
-    card2_wins_query = """
-    SELECT COUNT(*) FROM choice 
-    WHERE fav_card_id = %s
-    """
-    cursor.execute(card2_wins_query, (card2_id,))
-    card2_wins = cursor.fetchone()[0]
-
-    # Calcul des pourcentages
-    card1_percentage = (card1_wins / total_choices) * 100
-    card2_percentage = (card2_wins / total_choices) * 100
-
-    cursor.close()
-    conn.close()
-
-    return jsonify({
-        'card1_percentage': card1_percentage,
-        'card2_percentage': card2_percentage
-    })
-
-
-@app.route('/export_choices', methods=['GET'])
-def export_choices():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM public.choice;")
-    choices = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    # Création du fichier .txt avec les INSERT
-    file_path = os.path.join(os.getcwd(), 'choice_insert.sql')
-    with open(file_path, 'w') as f:
-        for choice in choices:
-            choice_id, card1_id, card2_id, fav_card_id = choice
-            insert_query = f"INSERT INTO choice (card1_id, card2_id, fav_card_id) VALUES ('{card1_id}', '{card2_id}', '{fav_card_id}');\n"
-            f.write(insert_query)
-
-    return jsonify({'message': 'Data exported successfully', 'file': file_path})
-
-
-@app.route('/search_artists', methods=['GET'])
-def search_artists():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    name_query = request.args.get('name')
-
-    query = """
-    SELECT name
-    FROM Artist
-    WHERE name ILIKE %s
-    LIMIT 10;
-    """
-    cursor.execute(query, (f'%{name_query}%',))
-    artists = cursor.fetchall()
-
-    cursor.close()
-    conn.close()
-
-    return jsonify([{"name": artist[0]} for artist in artists])
-
-
-@app.route('/artist_info', methods=['GET'])
-def artist_info():
-    print("pipi")
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    artist_name = request.args.get('name')
-
-    query = """
-    SELECT a.name, a.number_of_card_produced,
-           (COUNT(c.fav_card_id)::FLOAT / NULLIF((COUNT(c.card1_id) + COUNT(c.card2_id)), 0)::FLOAT) * 100 AS win_rate
-    FROM Artist a
-    JOIN pokemon_card pc ON a.name = pc.artist
-    LEFT JOIN choice c ON pc.id = c.fav_card_id OR pc.id = c.card1_id OR pc.id = c.card2_id
-    WHERE pc.artist = %s
-    GROUP BY a.name, a.number_of_card_produced;
-    """
-    cursor.execute(query, (artist_name,))
-    artist = cursor.fetchone()
-
-    cursor.close()
-    conn.close()
-    print(artist)
-    if artist:
-        return jsonify({
-            "name": artist[0],
-            "number_of_card_produced": artist[1],
-            "win_rate": artist[2]
-        })
-    else:
-        return jsonify({"error": "Artiste non trouvé"}), 404
-
-
-@app.route('/artist_cards', methods=['GET'])
-def artist_cards():
-    print("caca")
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    artist_name = request.args.get('name')
-    page = request.args.get('page', 1, type=int)
-    limit = 20  # Limite de cartes par page
-    offset = (page - 1) * limit
-
-    query = """
-    SELECT pc.name, ps.name AS set_name, pc.image_url_large
-    FROM pokemon_card pc
-    JOIN pokemon_sets ps ON pc.set_id = ps.id
-    WHERE pc.artist = %s
-    LIMIT %s OFFSET %s;
-    """
-    cursor.execute(query, (artist_name, limit, offset))
-    cards = cursor.fetchall()
-
-    # Compter le nombre total de cartes pour la pagination
-    count_query = """
-    SELECT COUNT(*)
-    FROM pokemon_card pc
-    WHERE pc.artist = %s;
-    """
-    cursor.execute(count_query, (artist_name,))
-    total_cards = cursor.fetchone()[0]
-
-    cursor.close()
-    conn.close()
-
-    return jsonify({
-        'cards': cards,
-        'total_cards': total_cards,
-        'total_pages': (total_cards + limit - 1) // limit,  # Calcul du nombre de pages
-        'current_page': page
-    })
 
 
 

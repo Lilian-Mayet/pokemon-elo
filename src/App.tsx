@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import DuelPage from './pages/DuelPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import SearchPage from './pages/SearchPage';
+import StatsPage from './pages/StatsPage';
 
 export default function App() {
   const [dark, setDark] = React.useState(false);
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/duel" element={<DuelPage />} />
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/search" element={<SearchPage />} />
+           <Route path="/stats" element={<StatsPage />} />
           {/* 404 simple */}
           <Route path="*" element={<div className="py-10 text-sm text-gray-500">Page not found.</div>} />
         </Routes>
