@@ -17,6 +17,7 @@ export function Header({ darkMode, onToggleDark }: { darkMode: boolean; onToggle
           <NavLink to="/leaderboard" className={linkCls}>Leaderboard</NavLink>
           <NavLink to="/search" className={linkCls}>Search</NavLink>
            <NavLink to="/stats" className={linkCls}>Stats</NavLink>
+           <NavLink to="/set" className={linkCls}>Sets</NavLink>
           <a className="text-sm opacity-60 hover:opacity-100 underline underline-offset-4"
              href="https://www.chess.com/terms/elo-rating-system" target="_blank" rel="noreferrer">
             What is ELO?

@@ -186,7 +186,7 @@ function DuelCard({
         </div>
 
         {/* Image */}
-        <div className="relative aspect-[3/4] w-full  overflow-hidden bg-gray-100">
+        <div className="relative aspect-[2.5/3.5] w-[170px]  overflow-hidden bg-gray-100">
           {card ? (
             <img
               src={card.image}

@@ -434,5 +434,99 @@ def api_search():
         }
 
     return jsonify({ "items": [clean(r) for r in items] })
+
+
+
+
+# --- Sets tree: grouped by series, sorted by date ---
+@app.route('/api/sets_tree', methods=['GET'])
+def api_sets_tree():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT ps.id, ps.name, ps.series, ps.release_date, ps.logo_image
+        FROM public.pokemon_sets ps
+        ORDER BY ps.release_date ASC NULLS LAST, ps.name ASC;
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    # group by series
+    series = {}
+    for r in rows:
+        key = r['series'] or 'Unknown'
+        if key not in series:
+            series[key] = {
+                "series": key,
+                "release_date": None,
+                "sets": []
+            }
+        series[key]["sets"].append({
+            "id": r["id"],
+            "name": r["name"],
+            "series": key,
+            "release_date": r["release_date"].isoformat() if r["release_date"] else None,
+            "logo_image": r["logo_image"],  # maintenant dispo dans SELECT
+        })
+        # set series_release_date = min release_date des sets
+        if r["release_date"]:
+            if series[key]["release_date"] is None or r["release_date"] < series[key]["release_date"]:
+                series[key]["release_date"] = r["release_date"]
+
+    # transformer en liste + trier
+    out = []
+    for g in series.values():
+        out.append({
+            "series": g["series"],
+            "release_date": g["release_date"].isoformat() if g["release_date"] else None,
+            "sets": g["sets"]
+        })
+    # trier les séries par date
+    out.sort(key=lambda x: (x["release_date"] or "9999-12-31", x["series"]))
+    # trier les sets par date
+    for g in out:
+        g["sets"].sort(key=lambda s: (s["release_date"] or "9999-12-31", s["name"]))
+    return jsonify(out)
+
+
+# --- Cards of a set with sorting ---
+@app.route('/api/sets/<set_id>/cards', methods=['GET'])
+def api_set_cards(set_id):
+    sort = (request.args.get('sort') or 'elo_desc').lower()
+    if sort == 'elo_asc':
+        order = "COALESCE(pc.elo,1000) ASC"
+    elif sort == 'id_asc':
+        order = "pc.id ASC"
+    elif sort == 'id_desc':
+        order = "pc.id DESC"
+    else:
+        order = "COALESCE(pc.elo,1000) DESC"
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute(f"""
+        SELECT pc.id, pc.name, pc.image_url_large AS image, pc.artist,
+               COALESCE(pc.elo,1000) AS elo,
+               ps.name AS set_name, ps.series
+        FROM public.pokemon_card pc
+        JOIN public.pokemon_sets ps ON ps.id = pc.set_id
+        WHERE pc.set_id = %s
+        ORDER BY {order};
+    """, (set_id,))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    items = [{
+        "id": r["id"],
+        "name": r["name"],
+        "image": r["image"],
+        "artist": r["artist"],
+        "elo": float(r["elo"]),
+        "set_name": r["set_name"],
+        "series": r["series"],
+    } for r in rows]
+    return jsonify({ "items": items })
+
+
 if __name__ == '__main__':
     app.run(debug=True)
