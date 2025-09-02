@@ -1,5 +1,5 @@
 import React from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 
 type CardRow = {
   id: string;
@@ -8,7 +8,7 @@ type CardRow = {
   artist: string | null;
   elo: number;
   rarity?: string | null;
-  set_id: string;             
+  set_id: string;             // ✅ now provided by backend
   set_name: string;
   series: string;
   release_date: string | null;
@@ -50,7 +50,6 @@ export default function SearchPage() {
   const [items, setItems] = React.useState<CardRow[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
-  const [page, setPage] = React.useState(0);
   const limit = 50;
 
   // Load series/sets tree (for filters)
@@ -79,7 +78,7 @@ export default function SearchPage() {
     if (rarity) next.set("rarity", rarity);
     next.set("sort", sort);
     setSp(next, { replace: true });
-  }, [q, eloMin, eloMax, dateFrom, dateTo, series, setId, artist, rarity, sort]);
+  }, [q, eloMin, eloMax, dateFrom, dateTo, series, setId, artist, rarity, sort, setSp]);
 
   function buildQuery(offset: number) {
     const p = new URLSearchParams();
@@ -105,7 +104,6 @@ export default function SearchPage() {
       const res = await j<{ items: CardRow[]; total: number }>(buildQuery(offset));
       setItems(reset ? res.items : [...items, ...res.items]);
       setTotal(res.total || 0);
-      if (reset) setPage(0);
     } finally {
       setLoading(false);
     }
@@ -284,8 +282,9 @@ export default function SearchPage() {
       </aside>
 
       {/* Results */}
-      <div className="border rounded-md">
-        <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium uppercase text-gray-500 border-b">
+      <div className="border rounded-md overflow-hidden">
+        {/* Header */}
+        <div className="grid grid-cols-12 gap-3 px-3 py-2 text-[11px] font-semibold uppercase text-gray-500 border-b bg-gray-50">
           <div className="col-span-5">Card</div>
           <div className="col-span-2">ELO</div>
           <div className="col-span-2">Rarity</div>
@@ -300,32 +299,53 @@ export default function SearchPage() {
           <>
             {items.map((it) => (
               <div key={it.id} className="grid grid-cols-12 gap-3 px-3 py-2 items-center hover:bg-gray-50">
+                {/* Card (clickable to card page) */}
                 <div className="col-span-5 flex items-center gap-3 overflow-hidden">
-                  <img src={it.image} alt={it.name} className="h-10 w-8 object-cover rounded" />
+                  <Link to={`/cards/${encodeURIComponent(it.id)}`} className="shrink-0">
+                    <img src={it.image} alt={it.name} className="h-12 w-10 object-cover rounded border" />
+                  </Link>
                   <div className="truncate">
-                    <div className="text-sm font-medium truncate">{it.name}</div>
+                    <Link
+                      to={`/cards/${encodeURIComponent(it.id)}`}
+                      className="text-sm font-medium truncate hover:underline"
+                      title={it.name}
+                    >
+                      {it.name}
+                    </Link>
                     <div className="text-xs text-gray-500 truncate">
                       {it.series} · {it.artist || "Unknown"}
                     </div>
                   </div>
                 </div>
+
+                {/* ELO */}
                 <div className="col-span-2 font-semibold"> {Math.round(it.elo)} </div>
+
+                {/* Rarity */}
                 <div className="col-span-2 text-xs">{it.rarity || "—"}</div>
-                <div className="col-span-3 text-xs">
-                  {it.set_name}
+
+                {/* Set (clickable to set page) */}
+                <div className="col-span-3 text-xs truncate">
+                  <Link
+                    to={`/sets/${encodeURIComponent(it.set_id)}`}
+                    className="underline underline-offset-2 hover:opacity-90"
+                    title={it.set_name}
+                  >
+                    {it.set_name}
+                  </Link>
                   {it.release_date ? ` · ${it.release_date.slice(0,10)}` : ""}
                 </div>
               </div>
             ))}
 
-            <div className="flex items-center justify-between mt-4 p-3">
+            <div className="flex items-center justify-between p-3 border-t bg-white">
               <div className="text-xs text-gray-500">{items.length} / {total} shown</div>
               <button
                 className="px-3 py-1.5 text-sm rounded border"
                 onClick={() => runSearch(false)}
                 disabled={loading || items.length >= total}
               >
-                {loading ? "Loading…" : "Load more"}
+                {items.length >= total ? "All loaded" : (loading ? "Loading…" : "Load more")}
               </button>
             </div>
           </>
