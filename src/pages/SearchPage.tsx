@@ -8,6 +8,7 @@ type CardRow = {
   artist: string | null;
   elo: number;
   rarity?: string | null;
+  set_id: string;             
   set_name: string;
   series: string;
   release_date: string | null;

@@ -518,6 +518,7 @@ def api_search_advanced():
                pc.artist,
                COALESCE(pc.elo, 1000) AS elo,
                pc.rarity,
+                pc.set_id,
                ps.name AS set_name,
                ps.series,
                ps.release_date
@@ -537,6 +538,7 @@ def api_search_advanced():
         "artist": r["artist"],
         "elo": float(r["elo"]),
         "rarity": r["rarity"],
+        "set_id": r["set_id"],
         "set_name": r["set_name"],
         "series": r["series"],
         "release_date": r["release_date"].isoformat() if r["release_date"] else None,
@@ -632,6 +634,79 @@ def api_set_cards(set_id):
         "elo": float(r["elo"]),
         "set_name": r["set_name"],
         "series": r["series"],
+    } for r in rows]
+    return jsonify({ "items": items })
+
+
+# Set metadata
+@app.route('/api/sets/<set_id>', methods=['GET'])
+def api_set_info(set_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT ps.id, ps.name, ps.series, ps.release_date, ps.logo_image,
+               COUNT(pc.id) AS cards_count,
+               AVG(COALESCE(pc.elo,1000)) AS avg_elo
+        FROM public.pokemon_sets ps
+        LEFT JOIN public.pokemon_card pc ON pc.set_id = ps.id
+        WHERE ps.id = %s
+        GROUP BY ps.id, ps.name, ps.series, ps.release_date, ps.logo_image
+    """, (set_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({
+        "id": row["id"],
+        "name": row["name"],
+        "series": row["series"],
+        "release_date": row["release_date"].isoformat() if row["release_date"] else None,
+        "logo_image": row["logo_image"],
+        "cards_count": int(row["cards_count"]),
+        "avg_elo": float(row["avg_elo"] or 0.0),
+    })
+
+# Artist metadata
+@app.route('/api/artists/<path:name>', methods=['GET'])
+def api_artist_info(name):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT %s AS name,
+               COUNT(pc.id) AS cards_count,
+               AVG(COALESCE(pc.elo,1000)) AS avg_elo
+        FROM public.pokemon_card pc
+        WHERE pc.artist ILIKE %s
+    """, (name, name,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if not row or int(row["cards_count"]) == 0:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({
+        "name": row["name"],
+        "cards_count": int(row["cards_count"]),
+        "avg_elo": float(row["avg_elo"] or 0.0),
+    })
+
+# Artist cards (reuses sorting if you want server-side; we sort client-side anyway)
+@app.route('/api/artists/<path:name>/cards', methods=['GET'])
+def api_artist_cards(name):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("""
+        SELECT pc.id, pc.name, pc.image_url_large AS image,
+               COALESCE(pc.elo,1000) AS elo,
+               ps.name AS set_name, ps.series
+        FROM public.pokemon_card pc
+        JOIN public.pokemon_sets ps ON ps.id = pc.set_id
+        WHERE pc.artist ILIKE %s
+        ORDER BY COALESCE(pc.elo,1000) DESC
+    """, (name,))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    items = [{
+        "id": r["id"], "name": r["name"], "image": r["image"],
+        "elo": float(r["elo"]), "set_name": r["set_name"], "series": r["series"]
     } for r in rows]
     return jsonify({ "items": items })
 
