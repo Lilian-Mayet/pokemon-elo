@@ -437,6 +437,114 @@ def api_search():
 
 
 
+# --- Advanced search (cards) with combined filters & sort ---
+@app.route('/api/search_advanced', methods=['GET'])
+def api_search_advanced():
+    q = request.args.get('q', '').strip()
+    elo_min = request.args.get('elo_min', type=float)
+    elo_max = request.args.get('elo_max', type=float)
+    date_from = request.args.get('date_from')  # 'YYYY-MM-DD'
+    date_to = request.args.get('date_to')      # 'YYYY-MM-DD'
+    series = request.args.get('series', '').strip()
+    set_id = request.args.get('set_id', '').strip()
+    artist = request.args.get('artist', '').strip()
+    rarity = request.args.get('rarity', '').strip()
+    sort = (request.args.get('sort') or 'elo_desc').lower()
+    limit = request.args.get('limit', default=50, type=int)
+    offset = request.args.get('offset', default=0, type=int)
+
+    order = "COALESCE(pc.elo,1000) DESC"
+    if sort == 'elo_asc':
+        order = "COALESCE(pc.elo,1000) ASC"
+    elif sort == 'date_desc':
+        order = "ps.release_date DESC NULLS LAST"
+    elif sort == 'date_asc':
+        order = "ps.release_date ASC NULLS LAST"
+
+    where = []
+    args = []
+
+    if q:
+        where.append("(pc.name ILIKE %s OR pc.artist ILIKE %s OR ps.name ILIKE %s)")
+        like = f"%{q}%"
+        args.extend([like, like, like])
+
+    if elo_min is not None:
+        where.append("COALESCE(pc.elo,1000) >= %s")
+        args.append(elo_min)
+    if elo_max is not None:
+        where.append("COALESCE(pc.elo,1000) <= %s")
+        args.append(elo_max)
+
+    if date_from:
+        where.append("ps.release_date >= %s")
+        args.append(date_from)
+    if date_to:
+        where.append("ps.release_date <= %s")
+        args.append(date_to)
+
+    if series:
+        where.append("ps.series = %s")
+        args.append(series)
+    if set_id:
+        where.append("pc.set_id = %s")
+        args.append(set_id)
+    if artist:
+        where.append("pc.artist ILIKE %s")
+        args.append(f"%{artist}%")
+    if rarity:
+        where.append("pc.rarity ILIKE %s")
+        args.append(f"%{rarity}%")
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    # total
+    cur.execute(f"""
+        SELECT COUNT(*) AS total
+        FROM public.pokemon_card pc
+        JOIN public.pokemon_sets ps ON ps.id = pc.set_id
+        {where_sql}
+    """, args)
+    total = int(cur.fetchone()['total'])
+
+    # page
+    cur.execute(f"""
+        SELECT pc.id,
+               pc.name,
+               pc.image_url_large AS image,
+               pc.artist,
+               COALESCE(pc.elo, 1000) AS elo,
+               pc.rarity,
+               ps.name AS set_name,
+               ps.series,
+               ps.release_date
+        FROM public.pokemon_card pc
+        JOIN public.pokemon_sets ps ON ps.id = pc.set_id
+        {where_sql}
+        ORDER BY {order}
+        LIMIT %s OFFSET %s
+    """, args + [limit, offset])
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    items = [{
+        "id": r["id"],
+        "name": r["name"],
+        "image": r["image"],
+        "artist": r["artist"],
+        "elo": float(r["elo"]),
+        "rarity": r["rarity"],
+        "set_name": r["set_name"],
+        "series": r["series"],
+        "release_date": r["release_date"].isoformat() if r["release_date"] else None,
+    } for r in rows]
+
+    return jsonify({ "items": items, "total": total })
+
+
 
 # --- Sets tree: grouped by series, sorted by date ---
 @app.route('/api/sets_tree', methods=['GET'])
